@@ -77,8 +77,14 @@ body {
 }
 
 .field-row label {
-  flex: 0 0 5rem;
+  flex: 0 0 6.5rem;
   font-size: 0.9rem;
+}
+
+.field-hint {
+  margin: -0.25rem 0 0.65rem;
+  font-size: 0.78rem;
+  color: #64748b;
 }
 
 .field-row input[type="number"] {

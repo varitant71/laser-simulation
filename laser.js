@@ -5,11 +5,14 @@
   const MAX_STEPS = 10000;
   const PADDING = 48;
   const MAX_CELL = 40;
+  const EPS = 1e-9;
+  const VERT_EPS = 1e-6;
 
   const canvas = document.getElementById("gridCanvas");
   const ctx = canvas.getContext("2d");
   const inputM = document.getElementById("inputM");
   const inputN = document.getElementById("inputN");
+  const inputAngle = document.getElementById("inputAngle");
   const speedRange = document.getElementById("speedRange");
   const speedLabel = document.getElementById("speedLabel");
   const inputError = document.getElementById("inputError");
@@ -61,6 +64,41 @@
     return { ok: true, M, N };
   }
 
+  function parseInputs() {
+    const mn = parseMN();
+    if (!mn.ok) return mn;
+    const angleDeg = Number(inputAngle.value);
+    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 90) {
+      return { ok: false, message: "발사 각도는 0°~90° 사이여야 합니다." };
+    }
+    return { ok: true, M: mn.M, N: mn.N, angleDeg };
+  }
+
+  function directionFromAngle(angleDeg) {
+    const rad = (angleDeg * Math.PI) / 180;
+    const ux = Math.cos(rad);
+    const uy = Math.sin(rad);
+    if (Math.hypot(ux, uy) < EPS) {
+      return null;
+    }
+    return { ux, uy };
+  }
+
+  function snapToBounds(x, y, M, N) {
+    let sx = x;
+    let sy = y;
+    if (Math.abs(sx) < VERT_EPS) sx = 0;
+    if (Math.abs(sx - M) < VERT_EPS) sx = M;
+    if (Math.abs(sy) < VERT_EPS) sy = 0;
+    if (Math.abs(sy - N) < VERT_EPS) sy = N;
+    return { x: sx, y: sy };
+  }
+
+  function isVertexFloat(x, y, M, N) {
+    const { x: sx, y: sy } = snapToBounds(x, y, M, N);
+    return (sx === 0 || sx === M) && (sy === 0 || sy === N);
+  }
+
   function showInputError(msg) {
     if (msg) {
       inputError.hidden = false;
@@ -73,102 +111,120 @@
     }
   }
 
-  function isVertex(x, y, M, N) {
-    return (
-      (x === 0 || x === M) &&
-      (y === 0 || y === N)
-    );
-  }
-
   function vertexName(x, y, M, N) {
-    if (x === 0 && y === 0) return "A (0,0)";
-    if (x === M && y === 0) return "B (M,0)";
-    if (x === M && y === N) return "C (M,N)";
-    if (x === 0 && y === N) return "D (0,N)";
-    return `(${x},${y})`;
+    const { x: sx, y: sy } = snapToBounds(x, y, M, N);
+    if (sx === 0 && sy === 0) return "A (0,0)";
+    if (sx === M && sy === 0) return "B (M,0)";
+    if (sx === M && sy === N) return "C (M,N)";
+    if (sx === 0 && sy === N) return "D (0,N)";
+    return `(${sx},${sy})`;
   }
 
   /**
    * @returns {{ segments: Array<{x0,y0,x1,y1}>, outcome: object }}
    */
-  function computePath(M, N) {
+  function computePath(M, N, angleDeg) {
+    const dir = directionFromAngle(angleDeg);
+    if (!dir) {
+      return {
+        segments: [],
+        outcome: {
+          type: "error",
+          reflections: 0,
+          totalLength: 0,
+          message: "유효한 발사 방향을 만들 수 없습니다.",
+        },
+      };
+    }
+
     const segments = [];
     let x = 0;
     let y = 0;
-    let dx = 1;
-    let dy = 1;
+    let ux = dir.ux;
+    let uy = dir.uy;
     const seen = new Set();
     let reflections = 0;
-    let totalDiag = 0;
+    let totalLength = 0;
 
     for (let step = 0; step < MAX_STEPS; step++) {
-      const key = `${x},${y},${dx},${dy}`;
+      const key = `${x.toFixed(7)},${y.toFixed(7)},${ux.toFixed(7)},${uy.toFixed(7)}`;
       if (seen.has(key)) {
         return {
           segments,
           outcome: {
             type: "cycle",
             reflections,
-            totalDiag,
-            message: "동일한 상태가 반복되어 꼭지점 없이 주기적으로 진행합니다.",
+            totalLength,
+            angleDeg,
+            message:
+              "동일한 상태가 반복되어 꼭지점 없이 주기적으로 진행합니다.",
           },
         };
       }
       seen.add(key);
 
       const candidates = [];
-      if (dy > 0) candidates.push({ t: N - y, wall: "top" });
-      if (dy < 0) candidates.push({ t: y, wall: "bottom" });
-      if (dx > 0) candidates.push({ t: M - x, wall: "right" });
-      if (dx < 0) candidates.push({ t: (0 - x) / dx, wall: "left" });
+      if (uy > EPS) candidates.push({ t: (N - y) / uy, wall: "top" });
+      if (uy < -EPS) candidates.push({ t: (0 - y) / uy, wall: "bottom" });
+      if (ux > EPS) candidates.push({ t: (M - x) / ux, wall: "right" });
+      if (ux < -EPS) candidates.push({ t: (0 - x) / ux, wall: "left" });
 
-      const next = candidates.reduce((min, c) =>
-        c.t > 0 && (min === null || c.t < min.t) ? c : min
-      , null);
+      const next = candidates.reduce(
+        (min, c) => (c.t > EPS && (min === null || c.t < min.t) ? c : min),
+        null
+      );
 
-      if (!next || next.t <= 0) {
+      if (!next) {
         return {
           segments,
           outcome: {
             type: "error",
             reflections,
-            totalDiag,
+            totalLength,
+            angleDeg,
             message: "다음 벽을 찾을 수 없습니다.",
           },
         };
       }
 
       const t = next.t;
-      const x1 = x + t * dx;
-      const y1 = y + t * dy;
+      let x1 = x + t * ux;
+      let y1 = y + t * uy;
+
+      if (next.wall === "top") y1 = N;
+      else if (next.wall === "bottom") y1 = 0;
+      else if (next.wall === "right") x1 = M;
+      else if (next.wall === "left") x1 = 0;
 
       segments.push({ x0: x, y0: y, x1, y1 });
-      totalDiag += t;
+      totalLength += Math.hypot(x1 - x, y1 - y);
 
-      if (isVertex(x1, y1, M, N)) {
-        if (x1 === 0 && y1 === 0 && segments.length === 1 && t === 0) {
-          break;
+      if (isVertexFloat(x1, y1, M, N)) {
+        const v = snapToBounds(x1, y1, M, N);
+        const leftStart = v.x === 0 && v.y === 0 && reflections === 0;
+        if (!leftStart) {
+          return {
+            segments,
+            outcome: {
+              type: "vertex",
+              x: v.x,
+              y: v.y,
+              name: vertexName(v.x, v.y, M, N),
+              reflections,
+              totalLength,
+              angleDeg,
+              message: `꼭지점 ${vertexName(v.x, v.y, M, N)}에 도달하여 종료합니다.`,
+            },
+          };
         }
-        return {
-          segments,
-          outcome: {
-            type: "vertex",
-            x: x1,
-            y: y1,
-            name: vertexName(x1, y1, M, N),
-            reflections,
-            totalDiag,
-            message: `꼭지점 ${vertexName(x1, y1, M, N)}에 도달하여 종료합니다.`,
-          },
-        };
       }
 
       reflections += 1;
       x = x1;
       y = y1;
 
-      if (next.wall === "top" || next.wall === "bottom") dy = -dy;
-      else dx = -dx;
+      if (next.wall === "top" || next.wall === "bottom") uy = -uy;
+      else ux = -ux;
     }
 
     return {
@@ -176,7 +232,8 @@
       outcome: {
         type: "limit",
         reflections,
-        totalDiag,
+        totalLength,
+        angleDeg,
         message: `세그먼트 상한(${MAX_STEPS})에 도달했습니다. 주기적 반복 가능성을 확인하세요.`,
       },
     };
@@ -339,16 +396,21 @@
     ctx.restore();
   }
 
-  function updateResult(outcome, M, N) {
+  function updateResult(outcome, M, N, angleDeg) {
     resultStatus.textContent = outcome.message;
+    const len =
+      outcome.totalLength !== undefined
+        ? outcome.totalLength.toFixed(2)
+        : "0";
+    resultDetail.textContent = `발사 각도: ${angleDeg}° · 벽면 반사: ${outcome.reflections}회 · 경로 길이: ${len}`;
     const g = gcd(M, N);
     const l = lcm(M, N);
-    if (outcome.type === "vertex") {
-      resultDetail.textContent = `벽면 반사 횟수: ${outcome.reflections}회 · 대각선 이동(단위): ${outcome.totalDiag}`;
+    if (Math.abs(angleDeg - 45) < 1e-6) {
+      resultHint.textContent = `참고(45°): gcd(M,N)=${g}, lcm(M,N)=${l}. 45°일 때 경로 길이는 종종 lcm과 관련됩니다.`;
     } else {
-      resultDetail.textContent = `벽면 반사 횟수: ${outcome.reflections}회 · 대각선 이동(단위): ${outcome.totalDiag}`;
+      resultHint.textContent =
+        "참고: 45°가 아니면 꼭지점에 닿지 않고 반복·상한까지 진행할 수 있습니다. tan(각도)가 유리/무리에 따라 달라집니다.";
     }
-    resultHint.textContent = `참고: gcd(M,N)=${g}, lcm(M,N)=${l}. 정수 M,N에서 경로는 보통 유한하며, lcm과 대각선 총 길이가 관련됩니다.`;
   }
 
   function cancelAnimation() {
@@ -361,12 +423,13 @@
     btnStop.disabled = true;
     inputM.disabled = false;
     inputN.disabled = false;
+    inputAngle.disabled = false;
   }
 
-  function animatePath(segments, outcome, M, N, cellSize) {
+  function animatePath(segments, outcome, M, N, cellSize, angleDeg) {
     if (segments.length === 0) {
       drawGrid({ M, N, cellSize, segments: [] });
-      updateResult(outcome, M, N);
+      updateResult(outcome, M, N, angleDeg);
       cancelAnimation();
       return;
     }
@@ -418,7 +481,7 @@
       });
 
       if (segIndex >= segments.length) {
-        updateResult(outcome, M, N);
+        updateResult(outcome, M, N, angleDeg);
         cancelAnimation();
         return;
       }
@@ -430,7 +493,7 @@
   }
 
   function refreshGridOnly() {
-    const parsed = parseMN();
+    const parsed = parseInputs();
     if (!parsed.ok) {
       showInputError(parsed.message);
       return;
@@ -440,25 +503,26 @@
     state.N = parsed.N;
     state.cellSize = computeCellSize(state.M, state.N);
     drawGrid({ M: state.M, N: state.N, cellSize: state.cellSize });
-    resultStatus.textContent = "Start를 누르면 A(0,0)에서 레이저가 출발합니다.";
+    resultStatus.textContent =
+      "Start를 누르면 A(0,0)에서 설정한 각도로 레이저가 출발합니다.";
     resultDetail.textContent = "";
     resultHint.textContent = "";
   }
 
   function onStart() {
     cancelAnimation();
-    const parsed = parseMN();
+    const parsed = parseInputs();
     if (!parsed.ok) {
       showInputError(parsed.message);
       return;
     }
     showInputError("");
-    const { M, N } = parsed;
+    const { M, N, angleDeg } = parsed;
     state.M = M;
     state.N = N;
     state.cellSize = computeCellSize(M, N);
 
-    const { segments, outcome } = computePath(M, N);
+    const { segments, outcome } = computePath(M, N, angleDeg);
     state.segments = segments;
     state.outcome = outcome;
     state.animating = true;
@@ -466,12 +530,13 @@
     btnStop.disabled = false;
     inputM.disabled = true;
     inputN.disabled = true;
+    inputAngle.disabled = true;
 
     resultStatus.textContent = "시뮬레이션 진행 중…";
     resultDetail.textContent = "";
     resultHint.textContent = "";
 
-    animatePath(segments, outcome, M, N, state.cellSize);
+    animatePath(segments, outcome, M, N, state.cellSize, angleDeg);
   }
 
   function onStop() {
@@ -487,6 +552,9 @@
     if (!state.animating) refreshGridOnly();
   });
   inputN.addEventListener("input", () => {
+    if (!state.animating) refreshGridOnly();
+  });
+  inputAngle.addEventListener("input", () => {
     if (!state.animating) refreshGridOnly();
   });
 

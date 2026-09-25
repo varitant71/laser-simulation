@@ -10,7 +10,7 @@
     <header class="site-header">
       <h1>레이저 반사 시뮬레이션</h1>
       <p class="subtitle">
-        A(0,0)에서 45°로 출발한 빛이 사각형 ABCD 벽면에서 반사됩니다.
+        A(0,0)에서 설정한 각도(0°~90°)로 출발한 빛이 사각형 ABCD 벽면에서 반사됩니다.
       </p>
     </header>
 
@@ -34,6 +34,18 @@
           <label for="inputN">세로 N</label>
           <input type="number" id="inputN" min="1" max="200" value="4" />
         </div>
+        <div class="field-row">
+          <label for="inputAngle">발사 각도 (°)</label>
+          <input
+            type="number"
+            id="inputAngle"
+            min="0"
+            max="90"
+            step="any"
+            value="45"
+          />
+        </div>
+        <p class="field-hint">0°=가로(→), 90°=세로(↑). x축 기준 반시계 방향.</p>
         <div class="field-row">
           <label for="speedRange">재생 속도</label>
           <input type="range" id="speedRange" min="1" max="10" value="5" />
